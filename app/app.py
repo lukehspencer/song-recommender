@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from model import recommend_songs
+import os
  
 # ─── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -164,10 +165,12 @@ hr {
  
  
 # ─── Load data ───────────────────────────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 @st.cache_data
 def load_data():
-    # Replace this path with your actual CSV path
-    df = pd.read_csv("data/metadata.csv")
+    path = os.path.join(BASE_DIR, "data", "metadata.csv")
+    df = pd.read_csv(path)
     if "Unnamed: 0" in df.columns:
         df = df.drop(columns=["Unnamed: 0"])
     return df
