@@ -191,6 +191,13 @@ st.markdown("""
 try:
     metadata_df = load_data()
     all_tracks = sorted(metadata_df["track_name"].dropna().unique().tolist())
+    song_to_artist = (
+        metadata_df.dropna(subset=["track_name", "artists"])
+        .groupby("track_name")["artists"]
+        .first()
+        .str.replace(";", ", ", regex=False)
+        .to_dict()
+    )
     data_loaded = True
 except Exception as e:
     st.error(f"Could not load dataset: {e}. Make sure `your_dataset.csv` is in the same directory.")
@@ -212,6 +219,11 @@ if data_loaded:
                 key=f"song_{i}",
                 label_visibility="collapsed",
             )
+            # Auto-fill artist when song selection changes
+            prev_key = f"prev_song_{i}"
+            if st.session_state.get(prev_key) != song:
+                st.session_state[f"artist_{i}"] = song_to_artist.get(song, "") if song else ""
+                st.session_state[prev_key] = song
             artist = st.text_input(
                 "Artist",
                 placeholder="Artist name",
