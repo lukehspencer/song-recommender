@@ -167,7 +167,7 @@ hr {
 @st.cache_data
 def load_data():
     # Replace this path with your actual CSV path
-    df = pd.read_csv("../data/metadata.csv")
+    df = pd.read_csv("data/metadata.csv")
     if "Unnamed: 0" in df.columns:
         df = df.drop(columns=["Unnamed: 0"])
     return df
