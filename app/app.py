@@ -268,12 +268,13 @@ if data_loaded:
                 # Recommendation cards
                 for rank, (_, row) in enumerate(results.iterrows(), 1):
                     sim_pct = f"{row['similarity'] * 100:.0f}% match"
+                    artists_display = str(row['artists']).replace(";", ", ")
                     st.markdown(f"""
                     <div class="rec-card">
                         <div class="rec-rank">0{rank}</div>
                         <div class="rec-info">
                             <h4>{row['track_name']}</h4>
-                            <p>{row['artists']}</p>
+                            <p>{artists_display}</p>
                         </div>
                         <div class="sim-badge">{sim_pct}</div>
                     </div>
@@ -285,8 +286,11 @@ if data_loaded:
                 st.markdown('<div class="section-label">Feature Breakdown</div>', unsafe_allow_html=True)
                 display_cols = ["track_name", "artists"] + FEATURE_COLS + ["similarity"]
                 available_cols = [c for c in display_cols if c in results.columns]
+                display_df = results[available_cols].reset_index(drop=True).copy()
+                if "artists" in display_df.columns:
+                    display_df["artists"] = display_df["artists"].str.replace(";", ", ", regex=False)
                 st.dataframe(
-                    results[available_cols].reset_index(drop=True).style.format({
+                    display_df.style.format({
                         col: "{:.3f}" for col in FEATURE_COLS + ["similarity"] if col in results.columns
                     }).background_gradient(subset=["similarity"], cmap="Purples"),
                     use_container_width=True,
@@ -298,9 +302,85 @@ if data_loaded:
                 # ── Visualizations ───────────────────────────────────────────
                 st.markdown('<div class="section-label">Visualizations</div>', unsafe_allow_html=True)
  
-                tab1, tab2, tab3 = st.tabs(["🟣 Feature Heatmap", "📊 Radar Chart", "🔵 Feature Distribution"])
- 
+                # Build a dataframe of the user's input songs for comparison charts
+                user_song_rows = []
+                for s in songs_v:
+                    match = metadata_df[metadata_df["track_name"] == s]
+                    if not match.empty:
+                        user_song_rows.append(match.iloc[0])
+                user_songs_df = (
+                    pd.DataFrame(user_song_rows).reset_index(drop=True)
+                    if user_song_rows else pd.DataFrame(columns=metadata_df.columns)
+                )
+
+                tab1, tab2, tab3 = st.tabs([
+                    "📊 Your Taste vs Picks",
+                    "🟣 Your Songs",
+                    "🟣 Recommended Songs",
+                ])
+
                 with tab1:
+                    # Normalize to [0,1] using full-dataset range so loudness/tempo
+                    # are comparable with the 0-1 features.
+                    norm_cols = [c for c in FEATURE_COLS if c in results.columns and c in metadata_df.columns]
+                    col_min = metadata_df[norm_cols].min()
+                    col_max = metadata_df[norm_cols].max()
+                    col_range = col_max - col_min
+                    col_range[col_range == 0] = 1
+
+                    def normalize_feats(df):
+                        return (df[norm_cols] - col_min) / col_range
+
+                    rec_avg = normalize_feats(results)[norm_cols].mean()
+                    compare_rows = [{"Feature": f, "Value": rec_avg[f], "Group": "Recommended"} for f in norm_cols]
+                    if not user_songs_df.empty:
+                        user_avg = normalize_feats(user_songs_df)[norm_cols].mean()
+                        compare_rows += [{"Feature": f, "Value": user_avg[f], "Group": "Your Songs"} for f in norm_cols]
+                    compare_df = pd.DataFrame(compare_rows)
+
+                    fig_compare = px.bar(
+                        compare_df,
+                        x="Feature", y="Value", color="Group",
+                        barmode="group",
+                        title="Average Audio Features — Your Songs vs Recommended",
+                        color_discrete_map={"Your Songs": "#f472b6", "Recommended": "#a78bfa"},
+                        labels={"Value": "Normalized Value (0–1)", "Feature": ""},
+                    )
+                    fig_compare.update_layout(
+                        paper_bgcolor="#0a0a0f",
+                        plot_bgcolor="#13121a",
+                        font=dict(color="#e8e6f0", family="DM Sans"),
+                        title_font=dict(family="Syne", size=16),
+                        legend=dict(bgcolor="#13121a", bordercolor="#2a2735"),
+                        xaxis=dict(gridcolor="#2a2735"),
+                        yaxis=dict(gridcolor="#2a2735", range=[0, 1.05]),
+                    )
+                    st.plotly_chart(fig_compare, use_container_width=True)
+ 
+                with tab2:
+                    avail_feat_cols = [c for c in FEATURE_COLS if c in user_songs_df.columns]
+                    if not user_songs_df.empty and avail_feat_cols:
+                        user_heat_data = user_songs_df[avail_feat_cols].copy()
+                        user_heat_data.index = user_songs_df["track_name"].values
+                        fig_user_heat = px.imshow(
+                            user_heat_data,
+                            color_continuous_scale="RdPu",
+                            aspect="auto",
+                            title="Audio Feature Heatmap — Your Songs",
+                            labels=dict(color="Value"),
+                        )
+                        fig_user_heat.update_layout(
+                            paper_bgcolor="#0a0a0f",
+                            plot_bgcolor="#0a0a0f",
+                            font=dict(color="#e8e6f0", family="DM Sans"),
+                            title_font=dict(family="Syne", size=16),
+                            coloraxis_colorbar=dict(tickfont=dict(color="#e8e6f0")),
+                        )
+                        st.plotly_chart(fig_user_heat, use_container_width=True)
+                    else:
+                        st.info("No matching songs found in the dataset to display.")
+
+                with tab3:
                     feat_data = results[FEATURE_COLS].copy()
                     feat_data.index = results["track_name"].values
                     fig_heat = px.imshow(
@@ -308,7 +388,7 @@ if data_loaded:
                         color_continuous_scale="RdPu",
                         aspect="auto",
                         title="Audio Feature Heatmap — Recommended Songs",
-                        labels=dict(color="Scaled Value"),
+                        labels=dict(color="Value"),
                     )
                     fig_heat.update_layout(
                         paper_bgcolor="#0a0a0f",
@@ -318,51 +398,3 @@ if data_loaded:
                         coloraxis_colorbar=dict(tickfont=dict(color="#e8e6f0")),
                     )
                     st.plotly_chart(fig_heat, use_container_width=True)
- 
-                with tab2:
-                    fig_radar = go.Figure()
-                    colors = ["#a78bfa", "#f472b6", "#34d399", "#fb923c", "#60a5fa"]
-                    for idx, (_, row) in enumerate(results.iterrows()):
-                        values = [row[f] for f in FEATURE_COLS] + [row[FEATURE_COLS[0]]]
-                        fig_radar.add_trace(go.Scatterpolar(
-                            r=values,
-                            theta=FEATURE_COLS + [FEATURE_COLS[0]],
-                            fill='toself',
-                            name=row['track_name'],
-                            line=dict(color=colors[idx % len(colors)], width=2),
-                            fillcolor=f"rgba({int(colors[idx % len(colors)][1:3], 16)}, {int(colors[idx % len(colors)][3:5], 16)}, {int(colors[idx % len(colors)][5:7], 16)}, 0.13)",
-                        ))
-                    fig_radar.update_layout(
-                        polar=dict(
-                            bgcolor="#13121a",
-                            radialaxis=dict(visible=True, color="#2a2735", gridcolor="#2a2735"),
-                            angularaxis=dict(color="#6b6880", gridcolor="#2a2735"),
-                        ),
-                        paper_bgcolor="#0a0a0f",
-                        font=dict(color="#e8e6f0", family="DM Sans"),
-                        title=dict(text="Audio Feature Radar", font=dict(family="Syne", size=16)),
-                        legend=dict(bgcolor="#13121a", bordercolor="#2a2735"),
-                    )
-                    st.plotly_chart(fig_radar, use_container_width=True)
- 
-                with tab3:
-                    feat_long = results[["track_name"] + FEATURE_COLS].melt(
-                        id_vars="track_name", var_name="Feature", value_name="Value"
-                    )
-                    fig_bar = px.bar(
-                        feat_long,
-                        x="Feature", y="Value", color="track_name",
-                        barmode="group",
-                        title="Feature Comparison Across Recommended Songs",
-                        color_discrete_sequence=["#a78bfa", "#f472b6", "#34d399", "#fb923c", "#60a5fa"],
-                    )
-                    fig_bar.update_layout(
-                        paper_bgcolor="#0a0a0f",
-                        plot_bgcolor="#0a0a0f",
-                        font=dict(color="#e8e6f0", family="DM Sans"),
-                        title_font=dict(family="Syne", size=16),
-                        legend=dict(bgcolor="#13121a", bordercolor="#2a2735"),
-                        xaxis=dict(gridcolor="#2a2735"),
-                        yaxis=dict(gridcolor="#2a2735"),
-                    )
-                    st.plotly_chart(fig_bar, use_container_width=True)
